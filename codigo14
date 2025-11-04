@@ -1,3 +1,4 @@
+
 import os
 import re
 import speech_recognition as sr
@@ -6,23 +7,19 @@ import edge_tts
 import pygame
 import difflib
 import threading
-import serial
-import serial.tools.list_ports
 import time
 import sys
 import random
 import unicodedata
 import pyaudio
-from PyQt6.QtWidgets import QApplication, QWidget, QProgressBar, QVBoxLayout
 
 # --- Importações PyQt6 ---
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QTextEdit, QLabel, QFrame, 
-                             QSizePolicy, QLineEdit, QFileDialog)
+                             QSizePolicy, QLineEdit, QFileDialog, QProgressBar)
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QFont, QPixmap, QMovie, QIcon
 
-# --- IMPORTAÇÕES PARA PROCESSAMENTO E RECOMENDAÇÃO ---
 # --- IMPORTAÇÕES PARA PROCESSAMENTO E RECOMENDAÇÃO ---
 import pandas as pd
 import torch
@@ -60,24 +57,25 @@ class SplashScreen(QWidget):
                 background-color: {ArisConfig.WIDGET_COLOR};
                 border-radius: 15px;
                 border: 1px solid {ArisConfig.PRIMARY_COLOR};
+                font-size: 14px; /* Arial */
             }}
         """)
         layout.addWidget(self.frame)
 
         content_layout = QVBoxLayout(self.frame)
-        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setContentsMargins(10, 10, 10, 10)
         
         # Logo
         self.logo_label = QLabel()
         pixmap = QPixmap(ArisConfig.PROFILE_PIC_PATH)
-        self.logo_label.setPixmap(pixmap.scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.logo_label.setPixmap(pixmap.scaled(200, 100, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         content_layout.addWidget(self.logo_label)
 
         # Texto de Status
         self.status_label = QLabel("Iniciando ARIS...")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("font-size: 14px; color: #FFFFFF;")
+        self.status_label.setStyleSheet("font-size: 18px; color: #000000;") # Mantido 14px para status
         content_layout.addWidget(self.status_label)
 
         # Barra de Progresso
@@ -105,18 +103,17 @@ class SplashScreen(QWidget):
         self.status_label.setText(text)
 
 
-        # Adicione esta classe logo após a SplashScreen
 class InitializationWorker(QObject):
     """
     Worker que executa as tarefas pesadas de inicialização em uma thread separada.
     """
     progress_updated = pyqtSignal(int, str)  # (progresso, texto_status)
-    finished = pyqtSignal(object, str)       # (modelo_carregado, porta_arduino)
+    finished = pyqtSignal(object)       # (modelo_carregado) - SINAL CORRIGIDO
 
     def run(self):
         try:
             # Tarefa 1: Inicializar Pygame (Rápido)
-            self.progress_updated.emit(20, "Inicializando sistema de áudio...")
+            self.progress_updated.emit(30, "Inicializando sistema de áudio...")
             pygame.init()
             pygame.mixer.init()
             if os.path.exists(ArisConfig.MUSIC_FILE):
@@ -124,58 +121,50 @@ class InitializationWorker(QObject):
                 pygame.mixer.music.set_volume(0.3)
             time.sleep(0.5)
 
-            # Tarefa 2: Encontrar Arduino (Rápido)
-            self.progress_updated.emit(40, "Procurando dispositivos conectados...")
-            porta = encontrar_porta_arduino()
-            time.sleep(0.5)
-
-            # Tarefa 3: Carregar o Modelo de IA (LENTO)
+            # Tarefa 2: Carregar o Modelo de IA (LENTO)
             self.progress_updated.emit(60, "Carregando modelo de IA (pode demorar)...")
             modelo = SentenceTransformer(ArisConfig.MODELO_EMBEDDING)
             
             self.progress_updated.emit(100, "Tudo pronto!")
             time.sleep(1) # Uma pequena pausa para o usuário ver a conclusão
 
-            # Emite o sinal de finalizado com os resultados
-            self.finished.emit(modelo, porta)
+            # Emite o sinal de finalizado com os resultados (apenas o modelo)
+            self.finished.emit(modelo)
 
         except Exception as e:
             # Em caso de erro, podemos notificar o usuário
-            # Aqui, vamos apenas printar e finalizar
             print(f"Erro na inicialização: {e}")
-            self.finished.emit(None, None) # Envia None para indicar falha
+            self.finished.emit(None) # Envia None para indicar falha
 
 
 class ArisConfig:
     ASSETS_DIR = "maker"
-    PROFILE_PIC_PATH = os.path.join(ASSETS_DIR, "aris_icon.png") 
+    PROFILE_PIC_PATH = os.path.join(ASSETS_DIR, "logo_sesi.png") 
     THINKING_GIF_PATH = os.path.join(ASSETS_DIR, "thinking.gif") 
-    PRIMARY_COLOR = "#A202AE" 
-    ACCENT_COLOR = "#BB86FC" 
-    BACKGROUND_COLOR = "#121212" 
-    WIDGET_COLOR = "#1F1F1F" 
-    TEXT_COLOR = "#FFFFFF" 
-    TEXT_LOG_COLOR = "#CCCCCC" 
-    ERROR_COLOR = "#CF6679" 
+    PRIMARY_COLOR = "#A61010" 
+    ACCENT_COLOR = "#D13355" 
+    BACKGROUND_COLOR = "#E9E8E7" 
+    WIDGET_COLOR = "#E4DCE4" 
+    TEXT_COLOR = "#050505" 
+    TEXT_LOG_COLOR = "#000000" 
+    ERROR_COLOR = "#CB313E" 
     VOICE = "pt-BR-FranciscaNeural"
     MUSIC_FILE = "aris.audio.mp3"
     MODELO_EMBEDDING = 'paraphrase-multilingual-mpnet-base-v2'
 
 class RecomendadorVetorial:
     
-    # Modifique o __init__ e o carregar_modelo_e_dados
     def __init__(self, pasta_acervo, modelo_precarregado=None):
         self.MODELO_EMBEDDING = ArisConfig.MODELO_EMBEDDING
         self.NOME_ARQUIVO_DADOS = os.path.join(pasta_acervo, 'acervo_processado.csv')
         self.NOME_ARQUIVO_EMBEDDINGS = os.path.join(pasta_acervo, 'embeddings.pt')
-        self.modelo = modelo_precarregado  # Recebe o modelo já carregado
+        self.modelo = modelo_precarregado
         self.acervo_df = None
         self.embeddings = None
         self.carregado = False
 
     def carregar_modelo_e_dados(self):
         try:
-            # Se o modelo não foi pré-carregado, carregue-o agora (fallback)
             if self.modelo is None:
                 print("Carregando o modelo de linguagem para recomendação...")
                 self.modelo = SentenceTransformer(self.MODELO_EMBEDDING)
@@ -210,13 +199,13 @@ class RecomendadorVetorial:
         return livros_recomendados
 
 # ====================================================================
-# 2. WORKER PARA PROCESSAMENTO DE ACERVO (NOVO!)
+# 2. WORKER PARA PROCESSAMENTO DE ACERVO
 # ====================================================================
 
 class AcervoProcessorWorker(QObject):
     log_signal = pyqtSignal(str)
     progress_signal = pyqtSignal(str)
-    finished_signal = pyqtSignal(bool, str) # Sucesso (True/False), Caminho da Pasta de Saída ou Mensagem de Erro
+    finished_signal = pyqtSignal(bool, str)
 
     def __init__(self, excel_path, output_dir, api_key):
         super().__init__()
@@ -243,10 +232,12 @@ class AcervoProcessorWorker(QObject):
         doc = SimpleDocTemplate(self.pdf_path, pagesize=letter)
         styles, story = getSampleStyleSheet(), []
         style_titulo, style_body = styles['h2'], styles['BodyText']
+        style_titulo.fontName = "Helvetica-Bold"
+        style_body.fontName = "Helvetica"
         for _, row in dataframe.iterrows():
             story.append(Paragraph(row['titulo_original'], style_titulo))
-            story.append(Paragraph(f"<b>Autor(es):</b> {row['autor']}", style_body))
-            story.append(Paragraph(f"<b>Gêneros:</b> {row['generos']}", style_body))
+            story.append(Paragraph(f"<b>Autor(es):</b> {row['autor']}</b>", style_body))
+            story.append(Paragraph(f"<b>Gêneros:</b> {row['generos']}</b>", style_body))
             story.append(Paragraph(row['descricao'], style_body))
             story.append(Spacer(1, 0.25 * inch))
         try:
@@ -336,24 +327,27 @@ HF_TOKEN, client = None, None
 VOICE, MUSIC_FILE = ArisConfig.VOICE, ArisConfig.MUSIC_FILE
 RECOMENDADOR = None 
 CONVERSA_ATIVA = False
-main_async_loop, ser = None, None
+main_async_loop = None 
 CHAT_HISTORY, USER_NAME, USER_AGE = [], "Aluno", "Não informada"
-MAX_TENTATIVAS = 3
+MAX_TENTATIVAS = 5 
 
 def inicializar_cliente_hf(token):
     global client, HF_TOKEN
-    if not token or not token.startswith("hf_"): return False
+    if not token: return False
     try:
+        # Usa a classe OpenAI do SDK para acessar a rota do Hugging Face
         client = OpenAI(base_url="https://router.huggingface.co/v1", api_key=token)
+        # Testa a conexão fazendo uma chamada simples síncrona (Pode ser removido para evitar overhead)
+        # client.chat.completions.create(model="meta-llama/Meta-Llama-3-8B-Instruct", messages=[{"role": "user", "content": "Olá"}], max_tokens=10) 
         HF_TOKEN = token
         return True
     except Exception as e:
         print(f"Erro ao inicializar cliente HF: {e}")
+        client = None # Garante que o cliente seja None em caso de falha
         return False
 
-# ... (O restante do código do assistente, como ArisWorker, ArisWindow, etc., continua aqui)
 # ====================================================================
-# 4. FUNÇÕES AUXILIARES E ARDUINO
+# 4. FUNÇÕES AUXILIARES
 # ====================================================================
 
 def remover_acentos(texto):
@@ -365,81 +359,8 @@ def remover_acentos(texto):
 def similar(a, b):
     return difflib.SequenceMatcher(None, a, b).ratio()
 
-def encontrar_porta_arduino():
-    ports = serial.tools.list_ports.comports()
-    for port in ports:
-        desc = str(port.description).lower()
-        prod = str(port.product).lower()
-        if ("arduino" in desc or "ch340" in prod or "usb-serial" in desc or
-            "cp210x" in desc or "serial" in desc):
-            return port.device
-    return None
-
-def _enviar_comando_arduino_sync(comando):
-    global ser
-    if ser and ser.is_open:
-        try:
-            ser.write(f"{comando}\n".encode('utf-8'))
-        except Exception:
-            pass
-
-async def iniciar_servos_async():
-    await asyncio.to_thread(_enviar_comando_arduino_sync, "FALAR_START")
-
-async def parar_servos_async():
-    await asyncio.to_thread(_enviar_comando_arduino_sync, "FALAR_STOP")
-
-# ... (ArduinoListener Worker - Sem alterações) ...
 # ====================================================================
-# 5. THREAD DE CONTROLE DO ARDUINO (PyQt6 Worker)
-# ====================================================================
-
-class ArduinoListener(QObject):
-    activation_signal = pyqtSignal()
-    log_signal = pyqtSignal(str)
-
-    def __init__(self, porta_serial, baud_rate=9600):
-        super().__init__()
-        self.porta_serial = porta_serial
-        self.baud_rate = baud_rate
-        self._is_running = True
-
-    def run(self):
-        global ser
-        if not self.porta_serial:
-            self.log_signal.emit("LOG: Gatilho de botão desativado (Serial não encontrada).")
-            return
-
-        while self._is_running:
-            try:
-                # Só verifica o Arduino se a API estiver conectada
-                if client is not None:
-                    if ser is None or not ser.is_open:
-                        ser = serial.Serial(self.porta_serial, self.baud_rate, timeout=1)
-                    
-                    if ser.is_open and not CONVERSA_ATIVA:
-                        if ser.in_waiting > 0:
-                            linha = ser.readline().decode('utf-8', errors='ignore').strip()
-                            if linha == "START":
-                                self.log_signal.emit("LOG: ✅ Botão detectado! Iniciando assistente...")
-                                self.activation_signal.emit()
-                                ser.flushInput()
-                            
-                    time.sleep(0.1)
-
-            except serial.SerialException:
-                time.sleep(5)
-            except Exception:
-                time.sleep(2)
-        
-        if ser and ser.is_open:
-            ser.close()
-
-    def stop(self):
-        self._is_running = False
-
-# ====================================================================
-# 6. THREAD DE CONTROLE DA ARIS (PyQt6 Worker) - COM LÓGICA ATUALIZADA
+# 5. THREAD DE CONTROLE DA ARIS (PyQt6 Worker)
 # ====================================================================
 
 class ArisWorker(QObject):
@@ -451,11 +372,11 @@ class ArisWorker(QObject):
     def __init__(self):
         super().__init__()
         self.r = sr.Recognizer()
-        self.r.pause_threshold = 1.5
+        self.r.pause_threshold = 2.0 
         self._is_running = True
         self.mic_thread = threading.Thread(target=self._ouvir_palavra_de_ativacao, daemon=True)
 
-    # --- Funções de I/O (falar, ouvir_e_reconhecer) - Sem alterações ---
+    # --- Funções de I/O (falar, ouvir_e_reconhecer) - SEM SERVOS
     async def falar(self, texto):
         filename = "aris_speech_output.mp3"
         try:
@@ -470,15 +391,12 @@ class ArisWorker(QObject):
             canal_fala = pygame.mixer.Channel(0) 
             canal_fala.play(som_fala)
             
-            await iniciar_servos_async()
-            
             while canal_fala.get_busy():
                 await asyncio.sleep(0.1) 
                 
         except Exception as e:
             self.log_signal.emit(f"LOG: Erro ao falar: {e}")
         finally:
-            await parar_servos_async()
             if CONVERSA_ATIVA:
                 self.status_signal.emit("ARIS Parou. Próximo comando...")
                 self.activity_animation_signal.emit("idle")
@@ -490,27 +408,25 @@ class ArisWorker(QObject):
         self.activity_animation_signal.emit("listening") 
         
         try:
-            audio = await asyncio.to_thread(recognizer.listen, source, timeout=10, phrase_time_limit=30)
+            audio = await asyncio.to_thread(recognizer.listen, source, timeout=15, phrase_time_limit=40)
             
             self.activity_animation_signal.emit("idle")
             self.status_signal.emit("Processando...")
             
             pygame.mixer.music.play(loops=-1)
-            await iniciar_servos_async()
             
             texto = await asyncio.to_thread(recognizer.recognize_google, audio, language="pt-BR")
             
             pygame.mixer.music.stop()
-            await parar_servos_async()
             
             self.log_signal.emit(f"VOCÊ: {texto.lower()}")
             return texto.lower()
         
         except sr.WaitTimeoutError:
-            self.log_signal.emit("ARIS: Não ouvi nada.")
+            self.log_signal.emit("LOG: O reconhecimento falhou (Timeout).") # Alterado para log sem "ARIS:"
             return ""
         except sr.UnknownValueError:
-            self.log_signal.emit("ARIS: Desculpe, não entendi.")
+            self.log_signal.emit("LOG: O reconhecimento falhou (UnknownValue).") # Alterado para log sem "ARIS:"
             return ""
         except Exception as e:
             self.log_signal.emit(f"LOG: Erro no reconhecimento: {e}")
@@ -518,7 +434,7 @@ class ArisWorker(QObject):
         finally:
             self.activity_animation_signal.emit("idle")
     
-    # --- Lógica Principal (Asyncio) ---
+    # --- Lógica de IA ---
     async def gerar_resposta_ia(self, prompt):
         global CHAT_HISTORY
         
@@ -526,15 +442,28 @@ class ArisWorker(QObject):
               self.log_signal.emit("LOG: ERRO: Tentativa de usar a API sem estar conectada.")
               return "Atenção: A API do Hugging Face não está conectada. Por favor, insira e conecte o seu token."
         
-        # Define as mensagens com histórico
         if "Analise:" in prompt:
             messages = [
                 {"role": "system", "content": "Você é um assistente de extração de dados. Responda APENAS com o dado solicitado e nada mais."}
             ]
             messages.append({"role": "user", "content": prompt})
         else:
+            if USER_AGE.isdigit() and int(USER_AGE) <= 12:
+                system_content = (
+                    f"Você é a ARIS, uma super-assistente de leitura **muito** brincalhona e divertida, ideal para crianças. "
+                    f"Seu nome é {USER_NAME} e sua idade é {USER_AGE}. Seu objetivo é encorajar a leitura de forma lúdica. "
+                    "Use emojis contextuais (🎉, 📚, ✨) para deixar a conversa mais animada. "
+                    "Sempre responda de forma envolvente e sem usar negrito, itálico ou asteriscos na resposta final. "
+                    "Mantenha um tom de melhor amiga/o aventureira/o."
+                )
+            else:
+                system_content = (
+                    f"Você é a ARIS, uma assistente de leitura amigável e atenciosa. "
+                    f"Seu nome é {USER_NAME} e sua idade é {USER_AGE}. Sempre responda de forma envolvente e sem usar negrito, itálico ou asteriscos na resposta final. "
+                    "Mantenha um tom adequado à idade do usuário."
+                )
             messages = [
-                {"role": "system", "content": f"Você é a ARIS, uma assistente de leitura amigável. Seu nome é {USER_NAME} e sua idade é {USER_AGE}. Sempre responda de forma envolvente e sem usar negrito, itálico ou asteriscos na resposta final. Mantenha um tom adequado à idade do usuário."}
+                {"role": "system", "content": system_content}
             ]
             
             max_history_length = 8
@@ -549,9 +478,9 @@ class ArisWorker(QObject):
         self.activity_animation_signal.emit("thinking")
         
         pygame.mixer.music.play(loops=-1)
-        await iniciar_servos_async()
         
         try:
+            # A chamada síncrona é movida para uma thread separada pelo asyncio.to_thread
             completion = await asyncio.to_thread(
                 client.chat.completions.create, 
                 model="meta-llama/Meta-Llama-3-8B-Instruct", 
@@ -566,6 +495,7 @@ class ArisWorker(QObject):
                 CHAT_HISTORY.append({"role": "assistant", "content": texto_resposta})
             
         except Exception as e:
+            # Esta exceção captura erros de rede, autenticação, cota, etc., durante a chamada LLM
             self.log_signal.emit(f"LOG: !!!!!!!! ERRO NA API HUGGING FACE: {e} !!!!!!!!")
             texto_resposta = "Desculpe, tive um problema ao processar sua solicitação com a API. Verifique sua chave de acesso ou tente novamente."
         
@@ -573,14 +503,13 @@ class ArisWorker(QObject):
             await asyncio.sleep(0.3) 
             
             pygame.mixer.music.stop()
-            await parar_servos_async()
             if CONVERSA_ATIVA:
                 self.status_signal.emit("Ouvindo...")
                 self.activity_animation_signal.emit("idle")
         
         return texto_resposta.replace("*", "")
 
-    # --- LÓGICA DE RECOMENDAÇÃO ATUALIZADA E MAIS ROBUSTA ---
+    # --- LÓGICA DE RECOMENDAÇÃO ---
     async def realizar_recomendacao_dedicada(self, r, source):
         global USER_AGE, USER_NAME, RECOMENDADOR
         
@@ -594,7 +523,7 @@ class ArisWorker(QObject):
 
         await self.falar("Que ótimo que você quer uma recomendação! Para acertar em cheio, preciso de algumas informações.")
 
-        # 1. PERGUNTA 1: NOME E IDADE (Lógica mantida)
+        # 1. PERGUNTA 1: NOME E IDADE (Com mais tentativas)
         if USER_NAME == "Aluno" or USER_AGE == "Não informada":
             await self.falar("Para começarmos, qual é o seu nome e quantos anos você tem?")
             nome_e_idade_validado = False
@@ -604,7 +533,7 @@ class ArisWorker(QObject):
                 resposta_usuario = await self.ouvir_e_reconhecer(r, source)
                 if not resposta_usuario: 
                     if tentativas < MAX_TENTATIVAS:
-                        await self.falar(f"Desculpe, não entendi. Pode repetir seu nome e sua idade, por favor?")
+                        await self.falar(f"Desculpe, não entendi. Pode repetir seu nome e sua idade, por favor? (Tentativa {tentativas} de {MAX_TENTATIVAS})")
                     continue
                 
                 analise_nome_e_idade = await self.gerar_resposta_ia(
@@ -626,17 +555,17 @@ class ArisWorker(QObject):
                 if USER_NAME != "Aluno" and USER_AGE != "Não informada":
                     nome_e_idade_validado = True
                     self.user_info_signal.emit(USER_NAME, USER_AGE)
-                    await self.falar(f"Entendido, {USER_NAME}! Com {USER_AGE} anos.")
+                    await self.falar(f"Entendido, {USER_NAME}! Com {USER_AGE} anos. Que legal!")
                 elif tentativas < MAX_TENTATIVAS:
-                    await self.falar("Ainda não consegui entender bem. Lembre-se, me diga seu nome e a sua idade em números.")
+                    await self.falar("Ainda não consegui entender bem. Lembre-se, me diga seu nome e a sua idade em números. Vamos tentar de novo.")
             
             if not nome_e_idade_validado:
-                await self.falar(f"Tudo bem, usarei o nome '{USER_NAME}' e uma recomendação mais ampla.")
+                await self.falar(f"Tudo bem, usarei o nome '{USER_NAME}' e uma recomendação mais ampla. Não se preocupe.")
         else:
             await self.falar(f"Certo, {USER_NAME}, sua idade ({USER_AGE} anos) já está anotada.")
 
 
-        # 2. PERGUNTA 2: GOSTOS (Lógica mantida, mas com fallback mais claro)
+        # 2. PERGUNTA 2: GOSTOS (Com mais tentativas)
         await self.falar(f"Agora, {USER_NAME}: que tipo de histórias, como aventura, fantasia ou ciência, você mais gosta de ler?")
         gostos = ""
         tentativas = 0
@@ -647,7 +576,7 @@ class ArisWorker(QObject):
             if resposta_usuario:
                 gostos = resposta_usuario
             elif tentativas < MAX_TENTATIVAS:
-                await self.falar("Não entendi seus gostos. Tente me dar um exemplo do tipo de livro que você gosta.")
+                await self.falar(f"Não entendi seus gostos. Tente me dar um exemplo do tipo de livro que você gosta. (Tentativa {tentativas} de {MAX_TENTATIVAS})")
         
         if not gostos:
             gostos = "livros de aventura e ficção geral" 
@@ -680,7 +609,7 @@ class ArisWorker(QObject):
             "--- LISTA DE LIVROS PERMITIDOS ---\n"
             f"{lista_livros_para_ia}"
             "--- FIM DA LISTA ---\n\n"
-            "Sua tarefa: Agora, fale diretamente com o {USER_NAME}. De uma forma amigável e apropriada para a idade, apresente 2 ou 3 dos livros da lista acima. Explique brevemente por que eles combinam com os gostos do usuário. Comece a sua resposta diretamente, sem introduções como 'Claro!' ou 'Com certeza!'."
+            "Sua tarefa: Agora, fale diretamente com o {USER_NAME}. De uma forma amigável e apropriada para a idade (lembre-se se deve ser brincalhona ou não), apresente 2 ou 3 dos livros da lista acima. Explique brevemente por que eles combinam com os gostos do usuário. Comece a sua resposta diretamente, sem introduções como 'Claro!' ou 'Com certeza!'."
         )
         
         msg = await self.gerar_resposta_ia(prompt_final)
@@ -688,7 +617,6 @@ class ArisWorker(QObject):
         
         await self.falar("Espero que goste! O que mais você gostaria de saber ou conversar?")
 
-    # ... (Restante do ArisWorker - _ouvir_palavra_de_ativacao, start_asyncio_loop, etc. - Sem alterações) ...
     # --- Métodos de Controle da Thread (Escuta de Ativação) ---
     def _ouvir_palavra_de_ativacao(self):
         with sr.Microphone() as source:
@@ -698,14 +626,13 @@ class ArisWorker(QObject):
             self.activity_animation_signal.emit("idle") 
             
             while self._is_running:
-                # SÓ ESCUTA SE A API ESTIVER CONECTADA
                 if client is None:
                     time.sleep(1) 
                     continue 
 
                 if not CONVERSA_ATIVA:
                     try:
-                        audio = self.r.listen(source, timeout=5, phrase_time_limit=3)
+                        audio = self.r.listen(source, timeout=8, phrase_time_limit=4)
                         texto = self.r.recognize_google(audio, language="pt-BR").lower()
                         texto_sem_acento = remover_acentos(texto)
                         
@@ -748,41 +675,65 @@ class ArisWorker(QObject):
         global CONVERSA_ATIVA
         self.status_signal.emit("Inicializando Microfone...")
         
-        # Garante que a conversa só inicie se a API estiver conectada
         if client is None:
               self.log_signal.emit("LOG: Tentativa de iniciar conversa sem API. Encerrando ciclo.")
               self._reiniciar_conversa()
               return
 
         with sr.Microphone() as source:
-            self.r.adjust_for_ambient_noise(source, duration=1.0)
+            self.r.adjust_for_ambient_noise(source, duration=2.0)
             
-            # Mensagem de boas-vindas
             await self.falar(random.choice([
                 "Olá! Eu sou a ARIS e estou pronta. O que você gostaria de conversar hoje?", 
                 "Oi, sou a ARIS, sua assistente de leitura. Em que posso te ajudar?",
                 "Tudo pronto aqui! É só me dizer o que precisa."
             ]))
+            
+            MAX_CONV_ATTEMPTS = 3 # Máximo de tentativas para ouvir o usuário
 
+            # --- CORREÇÃO: ENVOLVER O LOOP EM TRY-EXCEPT PARA EVITAR CRASHES ---
             while CONVERSA_ATIVA:
-                resposta_usuario = await self.ouvir_e_reconhecer(self.r, source)
-                
-                if not resposta_usuario: continue
+                try:
+                    tentativas = 0
+                    resposta_usuario = ""
 
-                # Comando para sair do loop de conversa
-                if any(comando in remover_acentos(resposta_usuario).lower() for comando in ["sair", "parar", "tchau", "encerrar", "finalizar"]):
-                    await self.falar("Tudo bem, foi ótimo conversar com você! Me chame de novo quando quiser.")
-                    break
+                    # NOVO LOOP PARA PEDIR REPETIÇÃO
+                    while not resposta_usuario and tentativas < MAX_CONV_ATTEMPTS:
+                        tentativas += 1
+                        
+                        # 1. Tenta ouvir e reconhecer
+                        resposta_usuario = await self.ouvir_e_reconhecer(self.r, source)
+                        
+                        if not resposta_usuario and tentativas < MAX_CONV_ATTEMPTS:
+                            # 2. Se falhar e ainda houver tentativas, pede para repetir
+                            await self.falar(f"Desculpe, não consegui te ouvir. Poderia repetir o que você disse? (Tentativa {tentativas} de {MAX_CONV_ATTEMPTS})")
+                        elif not resposta_usuario and tentativas == MAX_CONV_ATTEMPTS:
+                            # 3. Se esgotar as tentativas, encerra a conversa
+                            await self.falar("Parece que a comunicação está difícil. Vou encerrar a conversa por enquanto. Me chame de novo quando quiser.")
+                            break # Sai do loop interno
 
-                gatilhos_recomendacao = ["recomendar livro", "me da um livro", "recomendacao", "qual livro eu leio", "sugestao de leitura", "recomendo", "recomenda", "recomende"]
+                    if not resposta_usuario: # Saiu do loop interno sem resposta válida
+                        break # Sai do loop principal CONVERSA_ATIVA
 
-                if any(comando in remover_acentos(resposta_usuario).lower() for comando in gatilhos_recomendacao):
-                    self.log_signal.emit("LOG: ✅ Gatilho de recomendação detectado.")
-                    await self.realizar_recomendacao_dedicada(self.r, source)
-                else:
-                    msg = await self.gerar_resposta_ia(resposta_usuario)
-                    await self.falar(msg)
+                    if any(comando in remover_acentos(resposta_usuario).lower() for comando in ["sair", "parar", "tchau", "encerrar", "finalizar"]):
+                        await self.falar("Tudo bem, foi ótimo conversar com você! Me chame de novo quando quiser.")
+                        break
 
+                    gatilhos_recomendacao = ["recomendar livro", "me da um livro", "recomendacao", "qual livro eu leio", "sugestao de leitura", "recomendo", "recomenda", "recomende"]
+
+                    if any(comando in remover_acentos(resposta_usuario).lower() for comando in gatilhos_recomendacao):
+                        self.log_signal.emit("LOG: ✅ Gatilho de recomendação detectado.")
+                        await self.realizar_recomendacao_dedicada(self.r, source)
+                    else:
+                        msg = await self.gerar_resposta_ia(resposta_usuario)
+                        await self.falar(msg)
+
+                except Exception as e:
+                    self.log_signal.emit(f"LOG: ERRO CRÍTICO NO CICLO PRINCIPAL (LLM/FALA): {e}")
+                    # Mensagem de recuperação para o usuário
+                    await self.falar("Desculpe, tive um erro inesperado e preciso reiniciar a conversa. Por favor, me chame de novo.")
+                    break # Sai do loop, forçando o reinício da conversa
+                    
         self._reiniciar_conversa()
         
     def _reiniciar_conversa(self):
@@ -793,7 +744,6 @@ class ArisWorker(QObject):
         USER_AGE = "Não informada"
         pygame.mixer.music.stop()
         
-        # Atualiza o status
         if client is not None:
               self.status_signal.emit("Finalizada. Aguardando ativação (voz ou manual)...")
         else:
@@ -803,40 +753,81 @@ class ArisWorker(QObject):
         self.activity_animation_signal.emit("idle") 
         
 # ====================================================================
-# 7. JANELA PRINCIPAL (PyQt6) - COM INTERFACE ATUALIZADA
+# 6. JANELA PRINCIPAL (PyQt6) - COM FONTES PADRONIZADAS E SEM ARDUINO
 # ====================================================================
 
 class ArisWindow(QMainWindow):
     
-    # Modifique o __init__ para receber os dados pré-carregados
-    def __init__(self, modelo_precarregado, porta_arduino):
-        super().__init__()
-        # Armazena os dados
+    def __init__(self, modelo_precarregado):
+        # REMOVIDA A PORTA ARDUINO DO CONSTRUTOR
         self.modelo_precarregado = modelo_precarregado
-        self.porta_arduino = porta_arduino
-
+        
         super().__init__()
         self.setWindowTitle("ARIS - Assistente de Leitura")
         self.setGeometry(100, 100, 900, 750) 
         
         self.default_font = "Arial" 
 
-        # ... (Estilos CSS - Sem alterações) ...
+        # --- Folha de Estilo com Padronização de Fontes (12px) ---
         self.setStyleSheet(f"""
             QMainWindow {{ background-color: {ArisConfig.BACKGROUND_COLOR}; font-family: '{self.default_font}';}}
-            QFrame#HeaderFrame {{ background-color: {ArisConfig.PRIMARY_COLOR}; border-bottom: 3px solid {ArisConfig.ACCENT_COLOR}; padding: 10px; border-radius: 0px; }}
-            QLabel#TitleLabel {{ color: {ArisConfig.TEXT_COLOR}; font-size: 24px; font-weight: bold; }}
-            QTextEdit {{ background-color: {ArisConfig.WIDGET_COLOR}; border: 1px solid {ArisConfig.ACCENT_COLOR}; border-radius: 8px; padding: 10px; color: {ArisConfig.TEXT_LOG_COLOR}; }}
-            QFrame {{ background-color: {ArisConfig.WIDGET_COLOR}; border-radius: 8px; color: {ArisConfig.TEXT_COLOR}; border: 1px solid {ArisConfig.WIDGET_COLOR}; }}
-            QFrame#ChatFrame, QFrame#ArduinoInfoFrame, QFrame#ApiFrame {{ border: 1px solid {ArisConfig.ACCENT_COLOR}; box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3); }}
+            
+            /* PADRONIZAÇÃO DE FONTE GERAL (EXCETO TÍTULO) */
+            QLabel, QPushButton, QLineEdit, QFrame {{ 
+                color: {ArisConfig.TEXT_COLOR};
+                font-size: 14px;
+            }}
+            
+            /* NOVO ESTILO PARA LABELS DE API */
+            QLabel#ApiLabel {{
+                background-color: {ArisConfig.PRIMARY_COLOR}; /* Fundo vermelho */
+                color: #000000; /* Texto branco para contraste */
+                padding: 5px;
+                border-radius: 5px;
+                font-weight: bold;
+            }}
+            
+            QFrame#HeaderFrame {{ 
+                background-color: {ArisConfig.PRIMARY_COLOR};
+                border: none;
+                padding: 10px; 
+                border-radius: 0px; 
+            }}
+            
+            QLabel#TitleLabel {{ 
+                color: {ArisConfig.TEXT_COLOR};
+                font-size: 34px; /* Maior */
+                font-weight: bold; 
+                padding-left: 10px;
+            }}
+            
+           /* ESTILO PARA CAMPOS DE TEXTO (API E LOG) */
+            QTextEdit, QLineEdit {{ 
+                background-color: #FFFFFF;
+                border: 1px solid {ArisConfig.ACCENT_COLOR}; 
+                border-radius: 8px; 
+                padding: 10px; 
+                color: #333333; 
+                font-size: 14px;
+            }}
+            
+            QFrame {{ background-color: {ArisConfig.WIDGET_COLOR}; border-radius: 8px; border: 1px solid {ArisConfig.WIDGET_COLOR}; }}
+            QFrame#ChatFrame, QFrame#ApiFrame {{ border: 1px solid {ArisConfig.ACCENT_COLOR}; box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3); }}
+            
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {ArisConfig.ACCENT_COLOR}, stop:1 {ArisConfig.PRIMARY_COLOR});
                 color: {ArisConfig.TEXT_COLOR}; border-radius: 8px; padding: 10px 20px; font-weight: bold; border: none;
+                font-size: 12px; /* Padronizado */
             }}
             QPushButton:hover {{ 
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {ArisConfig.PRIMARY_COLOR}, stop:1 {ArisConfig.ACCENT_COLOR}); 
             }}
-            QLabel {{ color: {ArisConfig.TEXT_COLOR}; }}
+            
+            QLabel#StatusLabel {{
+                color: {ArisConfig.ACCENT_COLOR}; 
+                font-size: 14px; /* Mantido um pouco maior para destaque */
+                font-weight: bold;
+            }}
         """)
 
         central_widget = QWidget()
@@ -845,7 +836,11 @@ class ArisWindow(QMainWindow):
         main_layout.setContentsMargins(15, 15, 15, 15) 
         main_layout.setSpacing(15) 
         
-        # ... (Header - Sem alterações) ...
+        self.log_area = QTextEdit()
+        self.log_area.setReadOnly(True)
+        self.log_area.setFont(QFont(self.default_font, 11))
+        
+        # --- Header ---
         header_frame = QFrame()
         header_frame.setObjectName("HeaderFrame")
         header_layout = QHBoxLayout(header_frame)
@@ -855,54 +850,69 @@ class ArisWindow(QMainWindow):
         self.title_label.setObjectName("TitleLabel")
         header_layout.addWidget(self.title_label)
         
-        self.user_info_label = QLabel(f"Usuário: {USER_NAME} ({USER_AGE} anos)")
-        self.user_info_label.setStyleSheet(f"color: {ArisConfig.ACCENT_COLOR}; font-size: 12px;")
-        header_layout.addWidget(self.user_info_label)
-        header_layout.addStretch()
-
+        header_layout.addStretch() 
+        
+        # --- Logo (250x60) ---
         self.animation_label = QLabel()
         self.movie = QMovie(os.path.join(ArisConfig.ASSETS_DIR, "listening.gif"))
         self.animation_label.setMovie(self.movie)
-        self.animation_label.setFixedSize(60, 60) 
+        self.animation_label.setFixedSize(150, 60) 
         self.animation_label.setScaledContents(True) 
 
         header_layout.addWidget(self.animation_label)
         
-        self.status_label = QLabel("STATUS: Iniciando o sistema...")
-        self.status_label.setStyleSheet(f"color: {ArisConfig.ACCENT_COLOR}; font-size: 14px; font-weight: bold;")
-        header_layout.addWidget(self.status_label)
+        # --- Status Label (abaixo da animação) ---
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("StatusLabel") 
+        
+        header_layout.addWidget(self.status_label) # <-- ONDE O ERRO ANTERIOR PODE TER OCORRIDO
+        
         
         main_layout.addWidget(header_frame)
         
-        # ÁREA DE API E GOOGLE API KEY
+        # --- Configuração do Token de API ---
         api_frame = QFrame()
         api_frame.setObjectName("ApiFrame")
-        api_layout = QVBoxLayout(api_frame) # MUDADO PARA QVBoxLayout
+        api_layout = QHBoxLayout(api_frame)
+        api_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 1. Hugging Face/OpenAI API
+        self.hf_token_input = QLineEdit()
+        self.hf_token_input.setPlaceholderText("HF/OpenAI Token (LLM)")
+        
+        llm_label = QLabel("LLM API Token:")
+        llm_label.setObjectName("ApiLabel") # <--- ESTILO APLICADO
+        api_layout.addWidget(llm_label)
+        
+        api_layout.addWidget(self.hf_token_input, 3) 
 
-        # Linha do Token Hugging Face
-        hf_layout = QHBoxLayout()
-        hf_layout.addWidget(QLabel("Token (Hugging Face):"))
-        self.api_input = QLineEdit()
-        self.api_input.setPlaceholderText("Cole seu hf_...")
-        hf_layout.addWidget(self.api_input)
-        self.connect_button = QPushButton("Conectar API")
-        self.connect_button.clicked.connect(self.conectar_api)
-        hf_layout.addWidget(self.connect_button)
-        self.api_status_label = QLabel("API Status: Desconectada ❌")
-        hf_layout.addWidget(self.api_status_label)
-        api_layout.addLayout(hf_layout)
-
-        # Linha da Chave Google Books
-        google_layout = QHBoxLayout()
-        google_layout.addWidget(QLabel("Chave API (Google Books):"))
-        self.google_api_input = QLineEdit()
-        self.google_api_input.setPlaceholderText("Cole sua chave do Google Cloud...")
-        google_layout.addWidget(self.google_api_input)
-        api_layout.addLayout(google_layout)
-
+        self.connect_hf_button = QPushButton("Conectar LLM API")
+        self.connect_hf_button.clicked.connect(self.connect_hf_api)
+        api_layout.addWidget(self.connect_hf_button, 1) 
+        
+        api_layout.addWidget(QLabel("|")) # Separador visual
+        
+        # 2. Google Books API (used by Acervo Processor)
+        self.google_api_key_input = QLineEdit()
+        self.google_api_key_input.setPlaceholderText("Google Books API Key")
+        self.google_api_key_for_worker = ""
+        
+        google_label = QLabel("Google API Key:")
+        google_label.setObjectName("ApiLabel") # <--- ESTILO APLICADO
+        api_layout.addWidget(google_label)
+        
+        api_layout.addWidget(self.google_api_key_input, 3) 
+        
+        self.connect_google_button = QPushButton("Conectar Google API") # <--- NOVO BOTÃO
+        self.connect_google_button.clicked.connect(self.connect_google_api)
+        api_layout.addWidget(self.connect_google_button, 1)
+        
         main_layout.addWidget(api_frame)
         
-        # ÁREA DE PROCESSAMENTO E CARREGAMENTO
+        self.update_log("LOG: Sistema inicializado. Conecte as APIs para começar.")
+      
+        
+        # --- ÁREA DE PROCESSAMENTO E CARREGAMENTO ---
         acervo_frame = QFrame()
         acervo_frame.setObjectName("ApiFrame")
         acervo_layout = QHBoxLayout(acervo_frame)
@@ -917,19 +927,17 @@ class ArisWindow(QMainWindow):
 
         main_layout.addWidget(acervo_frame)
         
-        # ... (Restante da UI) ...
+        # --- Área de Log/Chat ---
         chat_frame = QFrame()
         chat_frame.setObjectName("ChatFrame")
         chat_layout = QVBoxLayout(chat_frame)
         chat_layout.setContentsMargins(10, 10, 10, 10)
         
-        self.log_area = QTextEdit()
-        self.log_area.setReadOnly(True)
-        self.log_area.setFont(QFont(self.default_font, 11))
         chat_layout.addWidget(self.log_area)
         
         main_layout.addWidget(chat_frame) 
         
+        # --- Painel Inferior (Só com Botões) ---
         bottom_panel_layout = QHBoxLayout()
         bottom_panel_layout.setSpacing(15)
         
@@ -950,28 +958,11 @@ class ArisWindow(QMainWindow):
         buttons_layout.addWidget(self.start_button)
         buttons_layout.addWidget(self.exit_button)
         buttons_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        bottom_panel_layout.addWidget(buttons_frame, 2) 
-        
-        arduino_info_frame = QFrame()
-        arduino_info_frame.setObjectName("ArduinoInfoFrame")
-        arduino_info_layout = QVBoxLayout(arduino_info_frame)
-        arduino_info_layout.setContentsMargins(10, 10, 10, 10)
-        
-        arduino_title_label = QLabel("Conexão Arduino")
-        arduino_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        arduino_title_label.setStyleSheet("font-weight: bold; font-size: 14px; color: " + ArisConfig.ACCENT_COLOR + ";")
-        arduino_info_layout.addWidget(arduino_title_label)
-
-        self.serial_label = QLabel(f"Porta Serial: {porta_arduino or 'Não Conectado'}")
-        self.serial_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.serial_label.setStyleSheet(f"font-size: 11px; color: {ArisConfig.TEXT_LOG_COLOR}; padding-top: 5px;")
-        arduino_info_layout.addWidget(self.serial_label)
-        arduino_info_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        bottom_panel_layout.addWidget(arduino_info_frame, 1) 
+        bottom_panel_layout.addWidget(buttons_frame) 
 
         main_layout.addLayout(bottom_panel_layout)
 
-        # 7. INICIALIZAR WORKERS E SINAIS
+        # 7. INICIALIZAR WORKERS E SINAIS (SEM ARDUINO)
         self.aris_worker = ArisWorker()
         self.aris_thread = QThread()
         self.aris_worker.moveToThread(self.aris_thread)
@@ -982,18 +973,46 @@ class ArisWindow(QMainWindow):
         self.aris_thread.started.connect(self.aris_worker.start_asyncio_loop)
         self.aris_thread.start()
         
-        self.arduino_thread = QThread()
-        self.arduino_worker = ArduinoListener(porta_arduino)
-        self.arduino_worker.moveToThread(self.arduino_thread)
-        self.arduino_worker.log_signal.connect(self.update_log)
-        self.arduino_worker.activation_signal.connect(self.aris_worker.start_main_conversation)
-        self.arduino_thread.started.connect(self.arduino_worker.run)
-        self.arduino_thread.start()
-
+        
         self.set_animation("idle") 
-        self.update_status("Aguardando **Token API** para iniciar...")
 
-    # --- SLOTS DA UI ---
+    # --- SLOTS DA UI PARA API ---
+    def connect_hf_api(self):
+        token = self.hf_token_input.text().strip()
+        if not token:
+            self.update_log("LOG: ERRO - Token de API LLM está vazio.")
+            return
+
+        self.update_log("LOG: Tentando conectar a API do LLM...")
+        if inicializar_cliente_hf(token):
+            self.update_log("LOG: ✅ API LLM conectada com sucesso!")
+            self.update_status("API Conectada! Diga 'E aí Aris' ou pressione Ativar.")
+            self.connect_hf_button.setEnabled(False)
+            self.hf_token_input.setEnabled(False)
+            
+            # Inicia a thread de escuta do microfone
+            if not self.aris_worker.mic_thread.is_alive():
+                 self.aris_worker.mic_thread.start()
+        else:
+            self.update_log("LOG: ❌ Falha ao conectar a API LLM. Verifique o token e a URL base.")
+            
+    def connect_google_api(self):
+        google_api_key = self.google_api_key_input.text().strip()
+        if not google_api_key:
+            self.update_log("LOG: ERRO - O campo da Google Books API está vazio.")
+            self.acervo_status_label.setText("Chave Google API pendente. ❌")
+            self.acervo_status_label.setStyleSheet(f"color: {ArisConfig.ERROR_COLOR};")
+            return
+
+        self.google_api_key_for_worker = google_api_key
+        self.update_log("LOG: ✅ Chave Google Books API registrada com sucesso!")
+        self.acervo_status_label.setText("Chave Google API registrada. Prossiga com o acervo. ✅")
+        self.acervo_status_label.setStyleSheet("color: #008000;")
+        self.connect_google_button.setEnabled(False)
+        self.google_api_key_input.setEnabled(False)
+            
+
+    # --- SLOTS DA UI (Existentes) ---
     def update_log(self, text):
         self.log_area.append(text)
         
@@ -1001,10 +1020,10 @@ class ArisWindow(QMainWindow):
         self.status_label.setText(text)
 
     def update_user_info(self, name, age):
-        self.user_info_label.setText(f"Usuário: {name} ({age} anos)")
+        # Esta função agora está vazia na interface, mas mantém o sinal para evitar erros
+        pass 
         
     def set_animation(self, state):
-        # ... (código de animação sem alterações) ...
         self.movie.stop()
         self.animation_label.setMovie(None) 
         self.animation_label.setPixmap(QPixmap()) 
@@ -1024,7 +1043,7 @@ class ArisWindow(QMainWindow):
             else:
                 current_gif_path = os.path.join(ArisConfig.ASSETS_DIR, "listening.gif")
             
-        else: # Estado IDLE (Logo Estática)
+        else: # Estado IDLE (Logo Estática - Proporcional)
             profile_path = ArisConfig.PROFILE_PIC_PATH
             if os.path.exists(profile_path):
                 pixmap = QPixmap(profile_path)
@@ -1042,9 +1061,10 @@ class ArisWindow(QMainWindow):
               self.movie.start()
 
     def iniciar_processamento_acervo(self):
-        google_api_key = self.google_api_input.text().strip()
+        google_api_key = self.google_api_key_for_worker 
         if not google_api_key:
-            self.update_log("LOG: ERRO - Insira a chave da API do Google Books para processar.")
+            self.update_log("LOG: ERRO - A chave da Google Books API não foi configurada.")
+            self.update_status("Chave Google API não configurada.")
             return
 
         file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar Arquivo Excel do Acervo", "", "Excel Files (*.xlsx)")
@@ -1069,14 +1089,11 @@ class ArisWindow(QMainWindow):
         global RECOMENDADOR
         if sucesso:
             self.update_log("LOG: Processamento concluído com sucesso! Carregando recomendador...")
-            # PASSA O MODELO PRÉ-CARREGADO AQUI
             RECOMENDADOR = RecomendadorVetorial(path_ou_erro, self.modelo_precarregado) 
-            self.update_log("LOG: Processamento concluído com sucesso! Carregando recomendador...")
-            RECOMENDADOR = RecomendadorVetorial(path_ou_erro)
             if RECOMENDADOR.carregar_modelo_e_dados():
                 num_livros = len(RECOMENDADOR.acervo_df)
                 self.acervo_status_label.setText(f"{num_livros} livros prontos para recomendação! ✅")
-                self.acervo_status_label.setStyleSheet("color: #00FF00;")
+                self.acervo_status_label.setStyleSheet("color: #008000;")
             else:
                 self.acervo_status_label.setText("Erro ao carregar dados processados. ❌")
                 self.acervo_status_label.setStyleSheet(f"color: {ArisConfig.ERROR_COLOR};")
@@ -1088,49 +1105,33 @@ class ArisWindow(QMainWindow):
         self.processor_thread.quit()
         self.processor_thread.wait()
 
-    def conectar_api(self):
-        token = self.api_input.text().strip()
-        if inicializar_cliente_hf(token):
-            self.api_status_label.setText("API Status: Conectada ✅")
-            self.api_status_label.setStyleSheet("color: #00FF00;")
-            self.connect_button.setEnabled(False)
-            self.api_input.setEnabled(False)
-            if not self.aris_worker.mic_thread.is_alive():
-                self.aris_worker.mic_thread.start()
-            self.update_status("API Conectada! Aguarde ativação...")
-            self.update_log("ARIS: Pronta! Diga 'E aí Aris' para começar.")
-        else:
-            self.api_status_label.setText("API Status: FALHA ❌")
-            self.api_status_label.setStyleSheet(f"color: {ArisConfig.ERROR_COLOR};")
-            self.update_log("LOG: Falha na conexão da API.")
-
     def manual_start(self):
         if not client:
-            self.update_log("LOG: AVISO: API não conectada.")
+            self.update_log("LOG: AVISO: API não conectada. Conecte o Token LLM para usar a ARIS.")
             return
         if not CONVERSA_ATIVA:
             self.aris_worker.start_main_conversation()
 
     def closeEvent(self, event):
         self.aris_worker.stop()
-        self.arduino_worker.stop()
         self.aris_thread.quit()
         self.aris_thread.wait()
-        self.arduino_thread.quit()
-        self.arduino_thread.wait()
         pygame.quit()
         event.accept()
 
 # ====================================================================
-# 8. BLOCO PRINCIPAL DE EXECUÇÃO
+# 7. BLOCO PRINCIPAL DE EXECUÇÃO
 # ====================================================================
 
 if __name__ == "__main__":
+    # Garante que o diretório de assets exista
+    if not os.path.exists(ArisConfig.ASSETS_DIR):
+        print(f"ATENÇÃO: Diretório de assets '{ArisConfig.ASSETS_DIR}' não encontrado. A interface pode não carregar corretamente.")
+
     app = QApplication(sys.argv)
     
     # 1. Cria e mostra a tela de Splash
     splash = SplashScreen()
-    # Centraliza a tela de splash
     splash.move(app.primaryScreen().geometry().center() - splash.rect().center())
     splash.show()
     
@@ -1142,20 +1143,20 @@ if __name__ == "__main__":
     # 3. Conecta os sinais do worker à splash screen e à lógica principal
     init_worker.progress_updated.connect(lambda p, s: (splash.set_progress(p), splash.set_status(s)))
     
-    main_window = None # Variável para segurar a janela principal
+    main_window = None
     
-    def on_initialization_finished(modelo, porta):
-        global main_window # Acessa a variável global
-        if modelo: # Se o carregamento teve sucesso
-            main_window = ArisWindow(modelo, porta)
+    def on_initialization_finished(modelo):
+        global main_window
+        if modelo:
+            # REMOVIDA A PORTA ARDUINO DA INSTANCIAÇÃO
+            main_window = ArisWindow(modelo)
             main_window.show()
         else:
-            # Lidar com erro de inicialização, se desejar
-            print("Não foi possível inicializar a aplicação.")
+            print("Não foi possível carregar o modelo de IA. Encerrando aplicação.")
             app.quit()
         
-        splash.close() # Fecha a splash screen
-        init_thread.quit() # Encerra a thread
+        splash.close()
+        init_thread.quit()
         init_thread.wait()
 
     init_worker.finished.connect(on_initialization_finished)
